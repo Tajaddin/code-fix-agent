@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "bugs": [
+    {"id": "01_off_by_one", "kind": "range_off_by_one", "expected_iters_max": 3},
+    {"id": "02_wrong_operator", "kind": "operator_swap", "expected_iters_max": 2},
+    {"id": "03_missing_return", "kind": "missing_return", "expected_iters_max": 2},
+    {"id": "04_mutable_default", "kind": "mutable_default_arg", "expected_iters_max": 3},
+    {"id": "05_wrong_comparison", "kind": "comparison_swap", "expected_iters_max": 2},
+    {"id": "06_index_error", "kind": "off_by_one_index", "expected_iters_max": 3},
+    {"id": "07_type_coercion", "kind": "implicit_coercion", "expected_iters_max": 2},
+    {"id": "08_inverted_condition", "kind": "inverted_if", "expected_iters_max": 2},
+    {"id": "09_early_return", "kind": "early_return_in_loop", "expected_iters_max": 3},
+    {"id": "10_shallow_copy", "kind": "shallow_vs_deep_copy", "expected_iters_max": 4},
+    {"id": "11_missing_init", "kind": "missing_attribute_init", "expected_iters_max": 2},
+    {"id": "12_unused_state", "kind": "unused_state_mutation", "expected_iters_max": 2}
+  ]
+}

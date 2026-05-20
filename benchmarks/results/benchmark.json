@@ -1,0 +1,159 @@
+{
+  "summary": {
+    "mode": "mock",
+    "n_bugs": 12,
+    "passed": 12,
+    "pass_rate_pct": 100.0,
+    "mean_iterations": 3.0,
+    "mean_tool_calls": 3.0,
+    "total_input_tokens": 360,
+    "total_output_tokens": 180,
+    "estimated_cost_usd": 0.0013
+  },
+  "records": [
+    {
+      "id": "01_off_by_one",
+      "kind": "range_off_by_one",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.603,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='4 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "02_wrong_operator",
+      "kind": "operator_swap",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.675,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='4 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "03_missing_return",
+      "kind": "missing_return",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.69,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='3 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "04_mutable_default",
+      "kind": "mutable_default_arg",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.64,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='3 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "05_wrong_comparison",
+      "kind": "comparison_swap",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.654,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='3 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "06_index_error",
+      "kind": "off_by_one_index",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.681,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='3 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "07_type_coercion",
+      "kind": "implicit_coercion",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.863,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='3 passed in 0.03s'",
+      "error": null
+    },
+    {
+      "id": "08_inverted_condition",
+      "kind": "inverted_if",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.668,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='3 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "09_early_return",
+      "kind": "early_return_in_loop",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.723,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='4 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "10_shallow_copy",
+      "kind": "shallow_vs_deep_copy",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.679,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='3 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "11_missing_init",
+      "kind": "missing_attribute_init",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.667,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='3 passed in 0.02s'",
+      "error": null
+    },
+    {
+      "id": "12_unused_state",
+      "kind": "unused_state_mutation",
+      "passed": true,
+      "iterations": 3,
+      "tool_calls": 3,
+      "elapsed_seconds": 0.683,
+      "input_tokens": 30,
+      "output_tokens": 15,
+      "final_summary": "PASS (exit 0) summary='4 passed in 0.03s'",
+      "error": null
+    }
+  ]
+}

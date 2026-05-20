@@ -1,0 +1,13 @@
+services:
+  fix:
+    build: .
+    image: code-fix-agent:latest
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    command: ["run", "bugs/01_off_by_one"]
+
+  bench:
+    build: .
+    image: code-fix-agent:latest
+    entrypoint: ["python", "-m", "benchmarks.run_benchmark"]
+    command: ["--mode", "mock"]
