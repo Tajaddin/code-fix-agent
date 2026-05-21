@@ -1,6 +1,6 @@
 # code-fix-agent
 
-> Autonomous Python bug-fix agent on the Anthropic Agent SDK. **12/12 pass rate on the curated mock dataset in 3 iterations per bug** (smoke run, no API key). Live Anthropic Haiku 4.5 target: 9/12 (75%) at under $0.05 total cost. Real pytest-driven fix loop, isolated workspace per attempt, no jailbreaks.
+> Autonomous Python bug-fix agent on the Anthropic Agent SDK. **12/12 pass on Claude Haiku 4.5 live, 3.58 mean iterations per bug, $0.10 total cost.** Real pytest-driven fix loop, isolated workspace per attempt, no jailbreaks. Reproduce live in 90 seconds.
 
 [![ci](https://github.com/Tajaddin/code-fix-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/code-fix-agent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -8,12 +8,16 @@
 
 ## Hero metrics
 
-Reproducible in 11 seconds with no API key: `python -m benchmarks.run_benchmark --mode mock`
+Reproducible:
+- `python -m benchmarks.run_benchmark --mode mock` (11 seconds, no API key, pipeline smoke)
+- `python -m benchmarks.run_benchmark --mode live` (90 seconds, needs ANTHROPIC_API_KEY, real Haiku 4.5)
 
-| Mode | Pass rate | Mean iterations / bug | Total tokens | Est cost (Haiku 4.5) |
-|---|---:|---:|---:|---:|
-| **mock (pipeline smoke)** | **12 / 12** | 3.0 | 540 | $0.0013 |
-| **live (target)** | 9 / 12 (75%) | under 4 | under 25k | under $0.05 |
+| Mode | Pass rate | Mean iterations / bug | Mean tool calls / bug | Total tokens | Realized cost (Haiku 4.5) |
+|---|---:|---:|---:|---:|---:|
+| **mock (pipeline smoke)** | **12 / 12** | 3.0 | 3.0 | 540 | $0.0013 |
+| **live (Haiku 4.5)** | **12 / 12** | **3.58** | **5.58** | 77,457 | **$0.1012** |
+
+Live run logged 2026-05-20: all 12 bugs fixed, no skips, no errors. The agent average 3.58 LLM rounds and 5.58 tool calls per bug. Total spend across the 12-bug sweep was ~10 cents. Per-bug records are in `benchmarks/results/benchmark.json`.
 
 The mock mode scripts the canonical (read -> edit -> run_tests) for each of the 12 bugs. A perfect 12/12 in mock means the workspace, tool dispatch, and agent loop are healthy; CI runs this on every push.
 
