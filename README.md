@@ -1,6 +1,6 @@
 # code-fix-agent
 
-> Autonomous Python bug-fix agent on the Anthropic Agent SDK. **12/12 pass on Claude Haiku 4.5 live, 3.58 mean iterations per bug, $0.10 total cost.** Real pytest-driven fix loop, isolated workspace per attempt, no jailbreaks. Reproduce live in 90 seconds.
+> Autonomous Python bug-fix agent on the Anthropic API. **12/12 pass on Claude Haiku 4.5 live, 3.58 mean iterations per bug, $0.10 total cost.** Real pytest-driven fix loop, isolated workspace per attempt, no jailbreaks. Reproduce live in 90 seconds.
 
 [![ci](https://github.com/Tajaddin/code-fix-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/code-fix-agent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -21,7 +21,7 @@ Live run logged 2026-05-20: all 12 bugs fixed, no skips, no errors. The agent av
 
 The mock mode scripts the canonical (read -> edit -> run_tests) for each of the 12 bugs. A perfect 12/12 in mock means the workspace, tool dispatch, and agent loop are healthy; CI runs this on every push.
 
-Live mode hands the same 12 bugs to Claude Haiku 4.5 via the Anthropic Agent SDK, with no scripted fixes. To reproduce:
+Live mode hands the same 12 bugs to Claude Haiku 4.5 via the Anthropic API, with no scripted fixes. To reproduce:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
