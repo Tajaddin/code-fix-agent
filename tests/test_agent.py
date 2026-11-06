@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from code_fix_agent.agent import Agent, run_agent
 from code_fix_agent.llm import MockLLM
 from code_fix_agent.workspace import Workspace
@@ -158,6 +160,38 @@ class TestIndependentScoring:
             verdict = ws.score()
         assert verdict["passed"] is False
         assert verdict["summary"].startswith("3 failed, 1 passed")
+
+    @pytest.mark.parametrize(
+        ("old", "new", "summary"),
+        [
+            ("    total = 0", "    __import__('pytest').skip('x')\n    total = 0", "4 skipped"),
+            ("    total = 0", "    __import__('pytest').xfail('x')\n    total = 0", "4 xfailed"),
+            (
+                "def sum_first_n",
+                "import pytest\npytest.skip('x', allow_module_level=True)\ndef sum_first_n",
+                "1 skipped",
+            ),
+            ("def sum_first_n", "import os\nos._exit(0)\ndef sum_first_n", ""),
+        ],
+        ids=["skip", "xfail", "module-skip", "exit-0"],
+    )
+    def test_source_that_dodges_the_tests_is_not_a_fix(self, old, new, summary):
+        # Each edit touches only buggy.py and leaves pytest exiting 0 or 5,
+        # with no test having passed.
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one"), sandbox="local") as ws:
+            ws.edit("buggy.py", old, new)
+            verdict = ws.score()
+        assert verdict["passed"] is False
+        assert verdict["tests_modified"] is False
+        assert verdict["summary"].startswith(summary)
+
+    def test_warnings_do_not_fail_a_real_fix(self):
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one"), sandbox="local") as ws:
+            ws.edit("buggy.py", "range(n)", "range(n + 1)")
+            ws.edit("buggy.py", "def sum_first_n", "import warnings\nwarnings.warn('w')\ndef sum_first_n")
+            verdict = ws.score()
+        assert verdict["passed"] is True, verdict["stdout"]
+        assert verdict["summary"].startswith("4 passed, 1 warning")
 
 
 class TestNoBenchmarkHints:

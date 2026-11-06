@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import re
 import shutil
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 
 from code_fix_agent.sandbox import RunResult, resolve_sandbox, run_pytest
@@ -155,8 +157,16 @@ class Workspace:
         setup snapshot and every other file from the workspace, and runs the
         whole suite. `tests_modified` reports whether the workspace's test
         files still match the snapshot's SHA-256.
+
+        Exit code 0 is not enough: the code under test can skip or xfail the
+        tests, or exit early, and pytest still exits 0. A pass needs every
+        test collected from the bug as it was at setup to be reported PASSED,
+        and nothing else (failed, skipped, xfailed, errors) in the counts.
         """
-        tests = sorted(name for name in self.originals if _is_test_file(name))
+        tests = tuple(sorted(name for name in self.originals if _is_test_file(name)))
+        expected = _original_tests(
+            tuple(sorted(self.originals.items())), tests, self.sandbox, timeout
+        )
         with tempfile.TemporaryDirectory(prefix="cfa-score-", ignore_cleanup_errors=True) as tmp:
             dest = Path(tmp)
             for name, data in self.originals.items():
@@ -165,12 +175,49 @@ class Workspace:
                     (dest / name).write_bytes(data)
                 elif current.is_file():
                     shutil.copyfile(current, dest / name)
-            result = _as_result(run_pytest(dest, tests, timeout=timeout, sandbox=self.sandbox))
+            run = run_pytest(dest, ["-rfEsxXp", *tests], timeout=timeout, sandbox=self.sandbox)
+        result = _as_result(run)
+        result["passed"] = result["passed"] and _only_these_passed(run.stdout, expected)
         result["tests_modified"] = any(
             _sha256(self.root / name) != hashlib.sha256(self.originals[name]).hexdigest()
             for name in tests
         )
         return result
+
+
+@cache
+def _original_tests(
+    files: tuple[tuple[str, bytes], ...], tests: tuple[str, ...], sandbox: str, timeout: float
+) -> tuple[str, ...]:
+    """Node ids pytest collects from `files`, the bug as it was at setup.
+
+    Cached on the file contents: every attempt at the same bug collects the
+    same tests.
+    """
+    with tempfile.TemporaryDirectory(prefix="cfa-collect-", ignore_cleanup_errors=True) as tmp:
+        for name, data in files:
+            (Path(tmp) / name).write_bytes(data)
+        run = run_pytest(Path(tmp), ["--collect-only", *tests], timeout=timeout, sandbox=sandbox)
+    ids = []
+    for line in run.stdout.splitlines():
+        file_part, sep, _ = line.strip().partition("::")
+        if sep and file_part in tests:
+            ids.append(line.strip())
+    if run.exit_code != 0 or not ids:
+        raise RuntimeError(f"could not collect the original tests: {run.stdout[-1000:]!r}")
+    return tuple(ids)
+
+
+def _only_these_passed(stdout: str, expected: tuple[str, ...]) -> bool:
+    """True if pytest's -rp lines name exactly `expected` and its counts are all passes."""
+    lines = stdout.splitlines()
+    passed = {line.removeprefix("PASSED ").strip() for line in lines if line.startswith("PASSED ")}
+    # The last line reads e.g. "4 passed, 1 warning in 0.02s".
+    summary = next((line.strip() for line in reversed(lines) if line.strip()), "")
+    counts = {kind: int(n) for n, kind in re.findall(r"(\d+) (\w+)", summary.split(" in ")[0])}
+    counts.pop("warning", None)
+    counts.pop("warnings", None)
+    return passed == set(expected) and counts == {"passed": len(expected)}
 
 
 def _is_test_file(name: str) -> bool:

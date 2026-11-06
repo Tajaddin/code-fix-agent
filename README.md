@@ -154,7 +154,7 @@ The prompt names neither the bug nor its kind. The agent reads `buggy.py` and `t
 
 Build the image once with `docker build -t code-fix-agent:latest .`. Every result records the runner used.
 
-**Scoring.** The agent's own `run_tests` result is not the verdict: it chooses which tests to run and can edit the test file. After the loop, the harness rebuilds the bug in a fresh directory from the files present at setup (tests from the setup snapshot, other files from the workspace, nothing the run created) and runs the whole suite with the same runner. That is `passed`. `self_reported_pass` keeps the agent's claim, and `tests_modified` flags test files that no longer match their SHA-256 from setup. Benchmark records also keep every tool input and the final diff.
+**Scoring.** The agent's own `run_tests` result is not the verdict: it chooses which tests to run and can edit the test file. After the loop, the harness rebuilds the bug in a fresh directory from the files present at setup (tests from the setup snapshot, other files from the workspace, nothing the run created) and runs the whole suite with the same runner. That is `passed`, and exit code 0 is not enough: every test collected from the bug as it was at setup must be reported `PASSED` and the counts must hold nothing else, so a `pytest.skip()`, a `pytest.xfail()` or an early `os._exit(0)` in the source fails. The verdict is read from pytest's output, and under either runner the code under test runs inside that pytest process: code written to forge the output (fake result lines, patched reporting) is not caught. `self_reported_pass` keeps the agent's claim, and `tests_modified` flags test files that no longer match their SHA-256 from setup. Benchmark records also keep every tool input and the final diff.
 
 ## Testing
 
@@ -162,10 +162,10 @@ Build the image once with `docker build -t code-fix-agent:latest .`. Every resul
 pytest --cov=code_fix_agent
 ```
 
-56 tests (the Docker one is skipped when the image is not built, the symlink one where creating symlinks needs admin rights):
+61 tests (the Docker one is skipped when the image is not built, the symlink one where creating symlinks needs admin rights):
 - `test_workspace.py` — copy, list, read, edit (success + missing-substring error), run_tests (fails on unfixed, passes on canonical fix), no inherited secrets, timeout kills child processes, sandbox selection and the Docker command line.
 - `test_tools.py` — schema completeness, dispatch, error surfacing, tracebacks in failing output, path confinement for every tool (`..`, absolute paths, symlinks).
-- `test_agent.py` — full read-edit-test loop with `MockLLM` on bugs 1 and 2, max-iteration safety, LLM exception handling, token accounting, scoring against subset runs, edited tests and a planted `conftest.py`, no bug id in the prompt, tool inputs and diff in the result, API timeout.
+- `test_agent.py` — full read-edit-test loop with `MockLLM` on bugs 1 and 2, max-iteration safety, LLM exception handling, token accounting, scoring against subset runs, edited tests, a planted `conftest.py` and source that skips, xfails or exits early; no bug id in the prompt, tool inputs and diff in the result, API timeout.
 - `test_bench_smoke.py` — runs the full mock benchmark (12 bugs) and asserts 12/12 pass; the mock run exits non-zero on any failure.
 
 The bench smoke test is the canary: if it ever drops below 12/12 in CI, either the dataset or the workspace layer regressed.
