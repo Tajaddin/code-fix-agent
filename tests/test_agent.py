@@ -218,6 +218,19 @@ class TestAuditTrail:
         assert "+    for i in range(n + 1):" in result.final_diff
         assert "test_buggy.py" not in result.final_diff
 
+    def test_diff_shows_created_and_deleted_files(self):
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
+            (ws.root / "conftest.py").write_bytes(b"import buggy\n")
+            (ws.root / "pkg").mkdir()
+            (ws.root / "pkg" / "helper.py").write_bytes(b"X = 1\n")
+            (ws.root / "test_buggy.py").unlink()
+            diff = ws.diff()
+        assert "--- /dev/null\n+++ b/conftest.py\n" in diff
+        assert "+import buggy\n" in diff
+        assert "--- /dev/null\n+++ b/pkg/helper.py\n" in diff
+        assert "--- a/test_buggy.py\n+++ /dev/null\n" in diff
+        assert "buggy.py\n+++ b/buggy.py" not in diff
+
     def test_no_edit_means_an_empty_diff(self):
         with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
             result = run_agent(ws, MockLLM(script=[]))

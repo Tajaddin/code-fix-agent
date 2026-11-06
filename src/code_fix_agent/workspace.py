@@ -128,19 +128,28 @@ class Workspace:
         return _as_result(run_pytest(self.root, [target], timeout=timeout, sandbox=self.sandbox))
 
     def diff(self) -> str:
-        """Unified diff of every file changed since setup."""
+        """Unified diff of every file changed, created or deleted since setup.
+
+        Created files, in subdirectories too, diff from /dev/null: code the
+        tests ran can plant a conftest.py or a new module, and the record
+        should show it.
+        """
+        current = {
+            path.relative_to(self.root).as_posix(): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
         chunks: list[str] = []
-        for name, data in self.originals.items():
-            current = self.root / name
-            after = current.read_bytes() if current.is_file() else b""
-            if after == data:
+        for name in sorted(self.originals.keys() | current.keys()):
+            before, after = self.originals.get(name), current.get(name)
+            if before == after:
                 continue
             chunks.extend(
                 difflib.unified_diff(
-                    data.decode("utf-8", errors="replace").splitlines(keepends=True),
-                    after.decode("utf-8", errors="replace").splitlines(keepends=True),
-                    fromfile=f"a/{name}",
-                    tofile=f"b/{name}",
+                    _lines(before),
+                    _lines(after),
+                    fromfile=f"a/{name}" if before is not None else "/dev/null",
+                    tofile=f"b/{name}" if after is not None else "/dev/null",
                 )
             )
         return "".join(chunks)
@@ -224,6 +233,10 @@ def _is_test_file(name: str) -> bool:
     return name == "conftest.py" or (
         name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
     )
+
+
+def _lines(data: bytes | None) -> list[str]:
+    return (data or b"").decode("utf-8", errors="replace").splitlines(keepends=True)
 
 
 def _sha256(path: Path) -> str | None:
