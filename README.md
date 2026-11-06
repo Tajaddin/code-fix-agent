@@ -88,25 +88,18 @@ code-fix-agent run bugs/01_off_by_one
 python -m benchmarks.run_benchmark --mode live
 ```
 
-Sample output (`run bugs/01_off_by_one`):
+`run` prints one JSON object and exits 0 when the fix passes scoring, 1 otherwise. Its fields:
 
-```json
-{
-  "bug_id": "01_off_by_one",
-  "sandbox": "docker",
-  "passed": true,
-  "self_reported_pass": true,
-  "tests_modified": false,
-  "iterations": 3,
-  "tool_calls": 3,
-  "elapsed_seconds": 4.21,
-  "total_input_tokens": 2843,
-  "total_output_tokens": 142,
-  "final_summary": "PASS (exit 0) summary='4 passed in 0.03s'",
-  "error": null,
-  "final_diff": "--- a/buggy.py\n+++ b/buggy.py\n@@ -1,6 +1,6 @@\n ..."
-}
-```
+| Field | Meaning |
+|---|---|
+| `bug_id`, `sandbox` | The bug folder's name and the runner the tests used (`docker` or `local`). |
+| `passed` | The verdict: the original tests on a clean copy (see [Scoring](#isolation-and-scoring)). |
+| `self_reported_pass`, `tests_modified` | The agent's own last `run_tests` said PASS; a test file differs from its setup SHA-256. |
+| `iterations`, `tool_calls`, `elapsed_seconds` | Model rounds, tool calls and wall time, scoring included. |
+| `total_input_tokens`, `total_output_tokens` | Token usage summed over the rounds. |
+| `final_summary` | Status line of the scoring run, e.g. `PASS (exit 0) summary='4 passed in ...'`. |
+| `error` | The model call's error, when one ended the loop; otherwise `null`. |
+| `final_diff` | Unified diff of the workspace since setup. |
 
 ## How the loop works
 
