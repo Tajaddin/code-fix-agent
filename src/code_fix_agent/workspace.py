@@ -52,27 +52,35 @@ class Workspace:
 
     # --- tools ------------------------------------------------------------
 
+    def resolve(self, rel: str) -> Path:
+        """Resolve `rel` (symlinks included) and refuse anything outside the root.
+
+        Every tool goes through this before touching the file system, so an
+        error never reveals whether an outside path exists.
+        """
+        root = self.root.resolve()
+        path = (root / rel).resolve()
+        if not path.is_relative_to(root):
+            raise PermissionError(f"path escapes workspace: {rel}")
+        return path
+
     def list_dir(self, rel: str = ".") -> list[str]:
-        target = (self.root / rel).resolve()
+        target = self.resolve(rel)
         if not target.is_dir():
             raise FileNotFoundError(f"not a directory: {rel}")
         return sorted(p.name for p in target.iterdir())
 
     def read(self, rel: str) -> str:
-        path = (self.root / rel).resolve()
+        path = self.resolve(rel)
         if not path.is_file():
             raise FileNotFoundError(f"not a file: {rel}")
-        if self.root not in path.parents and self.root != path.parent:
-            raise PermissionError(f"path escapes workspace: {rel}")
         return path.read_text(encoding="utf-8")
 
     def edit(self, rel: str, old: str, new: str) -> str:
         """str_replace edit. Errors if `old` is not found or not unique."""
-        path = (self.root / rel).resolve()
+        path = self.resolve(rel)
         if not path.is_file():
             raise FileNotFoundError(f"not a file: {rel}")
-        if self.root not in path.parents and self.root != path.parent:
-            raise PermissionError(f"path escapes workspace: {rel}")
         text = path.read_text(encoding="utf-8")
         if old not in text:
             raise ValueError("old string not found in file")
@@ -84,17 +92,26 @@ class Workspace:
 
     def search(self, pattern: str, rel: str = ".") -> list[tuple[str, int, str]]:
         """Substring search across files in the workspace (Python files only)."""
-        target = (self.root / rel).resolve()
+        root = self.root.resolve()
+        target = self.resolve(rel)
         out: list[tuple[str, int, str]] = []
         for path in target.rglob("*.py"):
+            path = path.resolve()
+            if not path.is_relative_to(root) or not path.is_file():
+                continue
             for i, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
                 if pattern in line:
-                    out.append((path.relative_to(self.root).as_posix(), i, line.rstrip()))
+                    out.append((path.relative_to(root).as_posix(), i, line.rstrip()))
         return out
 
     def run_tests(self, test_file: str = "test_buggy.py", timeout: float = 30.0) -> dict:
         """Run pytest on test_file. Returns dict with passed/failed counts and output."""
-        cmd = [sys.executable, "-m", "pytest", "-q", "--no-header", "--no-summary", test_file]
+        file_part, sep, node = test_file.partition("::")
+        path = self.resolve(file_part)
+        if not path.is_file():
+            raise FileNotFoundError(f"not a file: {file_part}")
+        target = path.relative_to(self.root.resolve()).as_posix() + sep + node
+        cmd = [sys.executable, "-m", "pytest", "-q", "--no-header", "--no-summary", target]
         try:
             proc = subprocess.run(
                 cmd,
