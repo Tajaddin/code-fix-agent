@@ -43,6 +43,14 @@ class TestExecute:
             out = execute(ws, "run_tests", {"test_file": "test_buggy.py"})
             assert out.startswith("PASS")
 
+    def test_failing_run_shows_the_assertion_that_failed(self):
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
+            out = execute(ws, "run_tests", {})
+        assert out.startswith("FAIL")
+        assert "assert sum_first_n(5) == 15" in out
+        assert "assert 10 == 15" in out
+        assert out.strip().splitlines()[-1].startswith("3 failed, 1 passed")
+
     def test_edit_file_error_surfaces(self):
         with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
             out = execute(ws, "edit_file", {"path": "buggy.py", "old": "missing", "new": "x"})

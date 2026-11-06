@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-PYTEST_ARGS = ["-q", "--no-header", "--no-summary", "-p", "no:cacheprovider"]
+PYTEST_ARGS = ["-q", "--no-header", "--tb=short", "-p", "no:cacheprovider"]
 
 # Python on Windows cannot start without SYSTEMROOT; the temp variables only
 # say where scratch files go. Nothing else is passed through.
