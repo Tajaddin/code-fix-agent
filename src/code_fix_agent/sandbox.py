@@ -1,19 +1,34 @@
 """Run pytest on model-edited code.
 
-The code under test is written by the model, so it is treated as untrusted:
-it gets none of the caller's environment (no API keys), and a timeout kills
-every process the tests started, not only pytest.
+The code under test is written by the model, so it is treated as untrusted.
+Two runners:
+
+- docker: a throwaway container with no network, a read-only file system and
+  workspace mount, no capabilities, and memory/CPU/process limits. Nothing
+  from the caller's environment is passed in.
+- local: a subprocess with a minimal environment (no API keys), in its own
+  process group so a timeout kills every process the tests started. It still
+  runs with the caller's file-system rights, so it is the fallback for when
+  Docker or the sandbox image is not available.
+
+"auto" picks docker when the `docker` CLI can see the sandbox image.
 """
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 PYTEST_ARGS = ["-q", "--no-header", "--tb=short", "-p", "no:cacheprovider"]
+SANDBOX_IMAGE = os.environ.get("CFA_SANDBOX_IMAGE", "code-fix-agent:latest")
+SANDBOX_MODES = ("auto", "docker", "local")
 
 # Python on Windows cannot start without SYSTEMROOT; the temp variables only
 # say where scratch files go. Nothing else is passed through.
@@ -27,15 +42,91 @@ class RunResult:
     stderr: str
 
 
+@cache
+def docker_available(image: str = SANDBOX_IMAGE) -> bool:
+    if shutil.which("docker") is None:
+        return False
+    try:
+        probe = subprocess.run(
+            ["docker", "image", "inspect", image], capture_output=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
+def resolve_sandbox(mode: str, image: str = SANDBOX_IMAGE) -> str:
+    """Map a requested mode to the runner that will be used: "docker" or "local"."""
+    if mode not in SANDBOX_MODES:
+        raise ValueError(f"sandbox must be one of {SANDBOX_MODES}, got {mode!r}")
+    if mode == "local":
+        return "local"
+    if docker_available(image):
+        return "docker"
+    if mode == "docker":
+        raise RuntimeError(
+            f"docker sandbox requested but image {image!r} is not available "
+            f"(build it with `docker build -t {image} .`)"
+        )
+    return "local"
+
+
 def minimal_env() -> dict[str, str]:
     env = {key: os.environ[key] for key in _ENV_ALLOWLIST if key in os.environ}
     env["PYTHONIOENCODING"] = "utf-8"
     return env
 
 
-def run_pytest(cwd: Path, args: list[str], *, timeout: float) -> RunResult:
-    """Run pytest in `cwd` in its own process group with a minimal environment."""
-    cmd = [sys.executable, "-B", "-m", "pytest", *PYTEST_ARGS, *args]
+def docker_command(cwd: Path, args: list[str], *, name: str, image: str = SANDBOX_IMAGE) -> list[str]:
+    cmd = [
+        "docker", "run", "--rm", "--name", name,
+        "--network", "none",
+        "--read-only", "--tmpfs", "/tmp",
+        "--memory", "512m", "--pids-limit", "128", "--cpus", "1",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--mount", f"type=bind,source={cwd},target=/work,readonly",
+        "--workdir", "/work",
+        "--entrypoint", "python",
+    ]
+    if hasattr(os, "getuid"):
+        # The temp workspace is private to the caller's uid on POSIX.
+        cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
+    return [*cmd, image, "-B", "-m", "pytest", *PYTEST_ARGS, *args]
+
+
+def run_pytest(
+    cwd: Path, args: list[str], *, timeout: float, sandbox: str = "local", image: str = SANDBOX_IMAGE
+) -> RunResult:
+    """Run pytest on `cwd` with the given runner ("docker" or "local")."""
+    if sandbox == "docker":
+        name = f"cfa-{uuid.uuid4().hex[:12]}"
+        # The docker client needs the caller's environment to reach the
+        # daemon; none of it is forwarded into the container.
+        return _run(
+            docker_command(cwd, args, name=name, image=image),
+            cwd=None,
+            env=None,
+            timeout=timeout,
+            on_timeout=lambda: _docker_kill(name),
+        )
+    if sandbox != "local":
+        raise ValueError(f"unknown runner: {sandbox!r}")
+    return _run(
+        [sys.executable, "-B", "-m", "pytest", *PYTEST_ARGS, *args],
+        cwd=cwd,
+        env=minimal_env(),
+        timeout=timeout,
+    )
+
+
+def _run(
+    cmd: list[str],
+    *,
+    cwd: Path | None,
+    env: dict[str, str] | None,
+    timeout: float,
+    on_timeout: Callable[[], object] | None = None,
+) -> RunResult:
     group = (
         {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         if os.name == "nt"
@@ -44,7 +135,7 @@ def run_pytest(cwd: Path, args: list[str], *, timeout: float) -> RunResult:
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
-        env=minimal_env(),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -55,6 +146,8 @@ def run_pytest(cwd: Path, args: list[str], *, timeout: float) -> RunResult:
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        if on_timeout is not None:
+            on_timeout()
         _kill_tree(proc)
         try:
             stdout, _ = proc.communicate(timeout=5)
@@ -62,6 +155,14 @@ def run_pytest(cwd: Path, args: list[str], *, timeout: float) -> RunResult:
             stdout = ""
         return RunResult(None, stdout or "", "timeout")
     return RunResult(proc.returncode, stdout, stderr)
+
+
+def _docker_kill(name: str) -> None:
+    # Killing the docker client does not stop the container.
+    try:
+        subprocess.run(["docker", "kill", name], capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:

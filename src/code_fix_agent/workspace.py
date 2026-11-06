@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from code_fix_agent.sandbox import RunResult, run_pytest
+from code_fix_agent.sandbox import RunResult, resolve_sandbox, run_pytest
 
 
 @dataclass
@@ -31,17 +31,23 @@ class Workspace:
     root: Path
     bug_id: str = ""
     _cleanup: bool = field(default=False, repr=False)
+    # "auto", "docker" or "local"; resolved at construction to the runner used.
+    sandbox: str = "auto"
+
+    def __post_init__(self) -> None:
+        self.sandbox = resolve_sandbox(self.sandbox)
 
     # --- creation ---------------------------------------------------------
 
     @classmethod
-    def from_bug_dir(cls, bug_dir: Path, cleanup: bool = True) -> Workspace:
+    def from_bug_dir(cls, bug_dir: Path, cleanup: bool = True, sandbox: str = "auto") -> Workspace:
         bug_dir = Path(bug_dir)
+        sandbox = resolve_sandbox(sandbox)  # fail before creating the temp dir
         tmp = Path(tempfile.mkdtemp(prefix=f"cfa-{bug_dir.name}-"))
         for child in bug_dir.iterdir():
             if child.is_file():
                 shutil.copy2(child, tmp / child.name)
-        return cls(root=tmp, bug_id=bug_dir.name, _cleanup=cleanup)
+        return cls(root=tmp, bug_id=bug_dir.name, _cleanup=cleanup, sandbox=sandbox)
 
     def __enter__(self) -> Workspace:
         return self
@@ -111,7 +117,7 @@ class Workspace:
         if not path.is_file():
             raise FileNotFoundError(f"not a file: {file_part}")
         target = path.relative_to(self.root.resolve()).as_posix() + sep + node
-        return _as_result(run_pytest(self.root, [target], timeout=timeout))
+        return _as_result(run_pytest(self.root, [target], timeout=timeout, sandbox=self.sandbox))
 
 
 def _as_result(run: RunResult) -> dict:

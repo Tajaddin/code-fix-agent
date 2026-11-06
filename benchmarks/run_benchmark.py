@@ -25,6 +25,7 @@ from pathlib import Path
 
 from code_fix_agent.agent import Agent
 from code_fix_agent.llm import AnthropicLLM, LLMClient, MockLLM
+from code_fix_agent.sandbox import SANDBOX_MODES, resolve_sandbox
 from code_fix_agent.workspace import Workspace
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -118,14 +119,15 @@ def _build_mock_llm(bug_id: str) -> MockLLM:
     return MockLLM(script=script)
 
 
-def _run_one(bug: dict, llm: LLMClient, max_iterations: int) -> dict:
+def _run_one(bug: dict, llm: LLMClient, max_iterations: int, sandbox: str = "auto") -> dict:
     bug_dir = BUGS_DIR / bug["id"]
-    with Workspace.from_bug_dir(bug_dir) as ws:
+    with Workspace.from_bug_dir(bug_dir, sandbox=sandbox) as ws:
         agent = Agent(llm=llm, max_iterations=max_iterations)
         result = agent.fix(ws)
     return {
         "id": bug["id"],
         "kind": bug.get("kind", ""),
+        "sandbox": ws.sandbox,
         "passed": result.passed,
         "iterations": result.iterations,
         "tool_calls": result.tool_calls,
@@ -148,9 +150,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-iterations", type=int, default=8)
     parser.add_argument("--model", default="claude-haiku-4-5-20251001")
     parser.add_argument("--out", type=Path, default=RESULTS_DIR / "benchmark.json")
+    parser.add_argument("--sandbox", choices=SANDBOX_MODES, default="auto")
     args = parser.parse_args(argv)
 
     bugs = _load_manifest()
+    sandbox = resolve_sandbox(args.sandbox)
     records: list[dict] = []
     for bug in bugs:
         if args.mode == "live":
@@ -158,12 +162,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             llm = _build_mock_llm(bug["id"])
         print(f"  [{args.mode}] {bug['id']}", file=sys.stderr)
-        records.append(_run_one(bug, llm, args.max_iterations))
+        records.append(_run_one(bug, llm, args.max_iterations, sandbox))
 
     n = len(records)
     passed = sum(1 for r in records if r["passed"])
     summary = {
         "mode": args.mode,
+        "sandbox": sandbox,
         "n_bugs": n,
         "passed": passed,
         "pass_rate_pct": round(100 * passed / n, 1) if n else 0,

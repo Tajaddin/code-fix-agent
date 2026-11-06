@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from code_fix_agent import sandbox
 from code_fix_agent.workspace import Workspace
 
 
@@ -74,7 +75,7 @@ class TestTestRunIsolation:
                 assert os.environ.get("CFA_PROBE_SECRET") is None
             """,
         )
-        with Workspace.from_bug_dir(bug) as ws:
+        with Workspace.from_bug_dir(bug, sandbox="local") as ws:
             result = ws.run_tests()
         assert result["passed"] is True, result["stdout"]
 
@@ -98,9 +99,66 @@ class TestTestRunIsolation:
                 time.sleep(60)
             """,
         )
-        with Workspace.from_bug_dir(bug) as ws:
+        with Workspace.from_bug_dir(bug, sandbox="local") as ws:
             result = ws.run_tests(timeout=6)
         time.sleep(5)
         assert result["summary"] == "timeout"
         assert started.exists(), "the test never started its child process"
         assert not late.exists(), "a process started by the tests outlived the timeout"
+
+
+class TestSandboxSelection:
+    def test_auto_falls_back_to_local_without_the_image(self, monkeypatch):
+        monkeypatch.setattr(sandbox, "docker_available", lambda image=sandbox.SANDBOX_IMAGE: False)
+        assert sandbox.resolve_sandbox("auto") == "local"
+
+    def test_auto_uses_docker_when_the_image_exists(self, monkeypatch):
+        monkeypatch.setattr(sandbox, "docker_available", lambda image=sandbox.SANDBOX_IMAGE: True)
+        assert sandbox.resolve_sandbox("auto") == "docker"
+
+    def test_explicit_docker_fails_before_creating_a_workspace(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sandbox, "docker_available", lambda image=sandbox.SANDBOX_IMAGE: False)
+        monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+        with pytest.raises(RuntimeError, match="not available"):
+            Workspace.from_bug_dir(_bug_dir("01_off_by_one"), sandbox="docker")
+        assert list(tmp_path.iterdir()) == []
+
+    def test_unknown_mode_is_rejected(self):
+        with pytest.raises(ValueError):
+            sandbox.resolve_sandbox("chroot")
+
+    def test_docker_command_shuts_off_network_env_and_writes(self, tmp_path):
+        cmd = sandbox.docker_command(tmp_path, ["test_buggy.py"], name="cfa-test")
+        pairs = set(zip(cmd, cmd[1:]))
+        assert ("--network", "none") in pairs
+        assert ("--cap-drop", "ALL") in pairs
+        assert ("--security-opt", "no-new-privileges") in pairs
+        assert "--read-only" in cmd
+        assert f"type=bind,source={tmp_path},target=/work,readonly" in cmd
+        assert not {"-e", "--env", "--env-file", "--privileged"} & set(cmd)
+        image_at = cmd.index(sandbox.SANDBOX_IMAGE)
+        assert cmd[image_at + 1 :] == ["-B", "-m", "pytest", *sandbox.PYTEST_ARGS, "test_buggy.py"]
+
+
+@pytest.mark.skipif(not sandbox.docker_available(), reason="sandbox image not built")
+class TestDockerSandbox:
+    def test_container_has_no_network_and_no_secrets(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-key")
+        bug = _write_bug(
+            tmp_path,
+            """
+            import os, socket
+
+            import pytest
+
+            def test_isolated():
+                assert os.environ.get("ANTHROPIC_API_KEY") is None
+                with pytest.raises(OSError):
+                    socket.create_connection(("1.1.1.1", 53), timeout=3)
+                with pytest.raises(OSError):
+                    open("written.txt", "w")
+            """,
+        )
+        with Workspace.from_bug_dir(bug, sandbox="docker") as ws:
+            result = ws.run_tests()
+        assert result["passed"] is True, result["stdout"]
