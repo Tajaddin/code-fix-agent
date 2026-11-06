@@ -65,16 +65,6 @@ Each bug has 3-4 pytest assertions; the agent needs to satisfy all of them.
 | `src/code_fix_agent/llm.py` | `AnthropicLLM` + `MockLLM` (scripted tool-call sequence). Both return the same `(content, stop_reason, usage)` shape. |
 | `benchmarks/run_benchmark.py` | Iterates the dataset, captures pass / iteration / token / cost stats per bug, writes JSON. |
 
-## Why this matters for production
-
-Recruiter signal this maps to:
-- **SWE-agent / coding-agent JDs** (Mango Languages, Sekai, M3 USA, Cohere Agent Infrastructure)
-- **Tool use + multi-turn loops** (any "Senior AI Engineer, Agentic Systems" role in 2026)
-- **Real-pytest-driven evaluation** (not LLM-as-judge, not vibe-graded)
-- **Bounded iteration budgets + token budgets** (the diff between a demo agent and a billable agent)
-
-This is the small-bench cousin of SWE-bench-Lite. It runs in seconds on a laptop and costs cents per full sweep. Drop SWE-bench-verified in next to scale; the agent loop does not change.
-
 ## Quick start
 
 ```bash
