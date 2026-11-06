@@ -6,6 +6,8 @@ Given a Workspace pointing at one bug folder, the agent:
    run tests.
 3. Stops when run_tests reports passed, or when the iteration budget is
    exhausted.
+4. Scores the result by running the original test suite on a clean copy
+   (Workspace.score); the model's own run_tests output is not the verdict.
 
 Returns an AgentResult capturing pass/fail, iteration count, total tokens,
 and the trail of tool calls.
@@ -17,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from code_fix_agent.llm import LLMClient
-from code_fix_agent.tools import execute, tool_schemas
+from code_fix_agent.tools import execute, status_line, tool_schemas
 from code_fix_agent.workspace import Workspace
 
 SYSTEM_PROMPT = (
@@ -41,7 +43,7 @@ SYSTEM_PROMPT = (
 @dataclass
 class AgentResult:
     bug_id: str
-    passed: bool
+    passed: bool  # verdict of the original tests, run after the loop
     iterations: int
     tool_calls: int
     elapsed_seconds: float
@@ -50,6 +52,8 @@ class AgentResult:
     tool_trail: list[dict[str, Any]] = field(default_factory=list)
     final_summary: str = ""
     error: str | None = None
+    self_reported_pass: bool = False  # the model's own run_tests said PASS
+    tests_modified: bool = False
 
 
 def run_agent(
@@ -116,15 +120,18 @@ def run_agent(
                     }
                 )
                 if tool_name == "run_tests" and output.startswith("PASS"):
-                    result.passed = True
-                    result.final_summary = output.split("\n", 1)[0]
+                    result.self_reported_pass = True
 
         if tool_results:
             messages.append({"role": "user", "content": tool_results})
 
-        if result.passed or stop_reason != "tool_use":
+        if result.self_reported_pass or stop_reason != "tool_use":
             break
 
+    verdict = ws.score()
+    result.passed = verdict["passed"]
+    result.tests_modified = verdict["tests_modified"]
+    result.final_summary = status_line(verdict)
     result.elapsed_seconds = round(time.perf_counter() - start, 3)
     return result
 

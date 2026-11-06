@@ -26,6 +26,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         "bug_id": result.bug_id,
         "sandbox": ws.sandbox,
         "passed": result.passed,
+        "self_reported_pass": result.self_reported_pass,
+        "tests_modified": result.tests_modified,
         "iterations": result.iterations,
         "tool_calls": result.tool_calls,
         "elapsed_seconds": result.elapsed_seconds,

@@ -95,3 +95,66 @@ class TestAgent:
             result = run_agent(ws, llm)
         assert result.total_input_tokens > 0
         assert result.total_output_tokens > 0
+
+
+class TestIndependentScoring:
+    """The verdict comes from the original tests, not from the model's own run."""
+
+    def test_running_only_an_already_passing_test_is_not_a_fix(self):
+        llm = MockLLM(
+            script=[
+                (
+                    [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_test",
+                            "name": "run_tests",
+                            "input": {"test_file": "test_buggy.py::test_zero"},
+                        }
+                    ],
+                    "tool_use",
+                )
+            ]
+        )
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
+            result = run_agent(ws, llm)
+        assert result.self_reported_pass is True
+        assert result.passed is False
+        assert "3 failed, 1 passed" in result.final_summary
+
+    def test_editing_the_tests_is_not_a_fix(self):
+        rewrite = {
+            "path": "test_buggy.py",
+            "old": "from buggy import sum_first_n",
+            "new": "def sum_first_n(n):\n    return n * (n + 1) // 2",
+        }
+        llm = MockLLM(
+            script=[
+                ([{"type": "tool_use", "id": "tu_edit", "name": "edit_file", "input": rewrite}], "tool_use"),
+                ([{"type": "tool_use", "id": "tu_test", "name": "run_tests", "input": {}}], "tool_use"),
+            ]
+        )
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
+            result = run_agent(ws, llm)
+        assert result.self_reported_pass is True
+        assert result.tests_modified is True
+        assert result.passed is False
+
+    def test_a_real_fix_scores_as_passed_with_tests_untouched(self):
+        script = _build_canonical_script("01_off_by_one", "range(n)", "range(n + 1)")
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
+            result = run_agent(ws, MockLLM(script=script))
+        assert result.passed is True
+        assert result.self_reported_pass is True
+        assert result.tests_modified is False
+        assert result.final_summary.startswith("PASS (exit 0) summary='4 passed")
+
+    def test_score_ignores_files_created_during_the_run(self):
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one"), sandbox="local") as ws:
+            (ws.root / "conftest.py").write_text(
+                "import buggy\nbuggy.sum_first_n = lambda n: n * (n + 1) // 2\n", encoding="utf-8"
+            )
+            assert ws.run_tests()["passed"] is True
+            verdict = ws.score()
+        assert verdict["passed"] is False
+        assert verdict["summary"].startswith("3 failed, 1 passed")

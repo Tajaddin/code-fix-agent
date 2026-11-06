@@ -7,6 +7,7 @@ Each Workspace owns:
 """
 from __future__ import annotations
 
+import hashlib
 import shutil
 import tempfile
 from contextlib import contextmanager
@@ -33,9 +34,12 @@ class Workspace:
     _cleanup: bool = field(default=False, repr=False)
     # "auto", "docker" or "local"; resolved at construction to the runner used.
     sandbox: str = "auto"
+    # Top-level files as they were at setup; score() rebuilds the bug from these.
+    originals: dict[str, bytes] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.sandbox = resolve_sandbox(self.sandbox)
+        self.originals = {p.name: p.read_bytes() for p in self.root.iterdir() if p.is_file()}
 
     # --- creation ---------------------------------------------------------
 
@@ -118,6 +122,45 @@ class Workspace:
             raise FileNotFoundError(f"not a file: {file_part}")
         target = path.relative_to(self.root.resolve()).as_posix() + sep + node
         return _as_result(run_pytest(self.root, [target], timeout=timeout, sandbox=self.sandbox))
+
+    # --- scoring ----------------------------------------------------------
+
+    def score(self, timeout: float = 30.0) -> dict:
+        """Run the original test suite against the workspace's current source.
+
+        The model can edit the test file, run a subset of it, or (through the
+        code its tests execute) drop a conftest.py into the workspace, so its
+        own run_tests result is not a score. This rebuilds the bug in a fresh
+        directory from the files present at setup, taking the tests from the
+        setup snapshot and every other file from the workspace, and runs the
+        whole suite. `tests_modified` reports whether the workspace's test
+        files still match the snapshot's SHA-256.
+        """
+        tests = sorted(name for name in self.originals if _is_test_file(name))
+        with tempfile.TemporaryDirectory(prefix="cfa-score-", ignore_cleanup_errors=True) as tmp:
+            dest = Path(tmp)
+            for name, data in self.originals.items():
+                current = self.root / name
+                if name in tests:
+                    (dest / name).write_bytes(data)
+                elif current.is_file():
+                    shutil.copyfile(current, dest / name)
+            result = _as_result(run_pytest(dest, tests, timeout=timeout, sandbox=self.sandbox))
+        result["tests_modified"] = any(
+            _sha256(self.root / name) != hashlib.sha256(self.originals[name]).hexdigest()
+            for name in tests
+        )
+        return result
+
+
+def _is_test_file(name: str) -> bool:
+    return name == "conftest.py" or (
+        name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+    )
+
+
+def _sha256(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
 
 def _as_result(run: RunResult) -> dict:

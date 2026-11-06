@@ -129,6 +129,8 @@ def _run_one(bug: dict, llm: LLMClient, max_iterations: int, sandbox: str = "aut
         "kind": bug.get("kind", ""),
         "sandbox": ws.sandbox,
         "passed": result.passed,
+        "self_reported_pass": result.self_reported_pass,
+        "tests_modified": result.tests_modified,
         "iterations": result.iterations,
         "tool_calls": result.tool_calls,
         "elapsed_seconds": result.elapsed_seconds,
