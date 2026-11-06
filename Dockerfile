@@ -15,7 +15,7 @@ COPY README.md LICENSE ./
 
 RUN pip install --no-cache-dir -e ".[dev]" \
     && useradd --create-home --uid 10001 app \
-    && chown app benchmarks/results
+    && chown -R app benchmarks/results
 
 USER app
 
