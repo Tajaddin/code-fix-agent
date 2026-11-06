@@ -83,10 +83,14 @@ class TestTestRunIsolation:
     def test_timeout_kills_processes_the_tests_started(self, tmp_path):
         started = tmp_path / "started"
         late = tmp_path / "late"
+        timeout = 20
+        # Leave pytest plenty of time to start, and have the child write
+        # `late` at a fixed time after the deadline, however late it began.
+        late_at = time.time() + timeout + 2
         child = (
             "import pathlib, time; "
             f"pathlib.Path({str(started)!r}).write_text('x'); "
-            "time.sleep(6); "
+            f"time.sleep(max(0, {late_at} - time.time())); "
             f"pathlib.Path({str(late)!r}).write_text('x')"
         )
         (tmp_path / "bug").mkdir()
@@ -101,8 +105,8 @@ class TestTestRunIsolation:
             """,
         )
         with Workspace.from_bug_dir(bug, sandbox="local") as ws:
-            result = ws.run_tests(timeout=6)
-        time.sleep(5)
+            result = ws.run_tests(timeout=timeout)
+        time.sleep(max(0, late_at + 2 - time.time()))
         assert result["summary"] == "timeout"
         assert started.exists(), "the test never started its child process"
         assert not late.exists(), "a process started by the tests outlived the timeout"
