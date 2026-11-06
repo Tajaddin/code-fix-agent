@@ -188,3 +188,11 @@ class TestAuditTrail:
         with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
             result = run_agent(ws, MockLLM(script=[]))
         assert result.final_diff == ""
+
+
+class TestAnthropicClient:
+    def test_requests_have_an_explicit_timeout(self):
+        from code_fix_agent.llm import AnthropicLLM
+
+        assert AnthropicLLM(api_key="sk-ant-test")._client.timeout == 60.0
+        assert AnthropicLLM(api_key="sk-ant-test", timeout=5.0)._client.timeout == 5.0
