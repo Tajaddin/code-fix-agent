@@ -8,12 +8,12 @@ Each Workspace owns:
 from __future__ import annotations
 
 import shutil
-import subprocess
-import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from code_fix_agent.sandbox import RunResult, run_pytest
 
 
 @dataclass
@@ -111,41 +111,27 @@ class Workspace:
         if not path.is_file():
             raise FileNotFoundError(f"not a file: {file_part}")
         target = path.relative_to(self.root.resolve()).as_posix() + sep + node
-        cmd = [sys.executable, "-m", "pytest", "-q", "--no-header", "--no-summary", target]
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=self.root,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return {
-                "passed": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": "timeout",
-                "summary": "timeout",
-            }
-        stdout = proc.stdout
-        stderr = proc.stderr
-        passed = proc.returncode == 0
-        # Pull the last non-empty line of stdout as a summary; pytest prints
-        # "X passed in Y.YYs" or "X failed, Y passed in Z.ZZs" there.
-        summary = ""
-        for line in reversed(stdout.splitlines()):
-            if line.strip():
-                summary = line.strip()
-                break
+        return _as_result(run_pytest(self.root, [target], timeout=timeout))
+
+
+def _as_result(run: RunResult) -> dict:
+    if run.exit_code is None:
         return {
-            "passed": passed,
-            "exit_code": proc.returncode,
-            "stdout": stdout[-4000:],  # truncate to keep tool result small
-            "stderr": stderr[-2000:],
-            "summary": summary,
+            "passed": False,
+            "exit_code": -1,
+            "stdout": run.stdout[-4000:],
+            "stderr": "timeout",
+            "summary": "timeout",
         }
+    # pytest prints "X passed in Y.YYs" or "X failed, Y passed in Z.ZZs" last.
+    summary = next((line.strip() for line in reversed(run.stdout.splitlines()) if line.strip()), "")
+    return {
+        "passed": run.exit_code == 0,
+        "exit_code": run.exit_code,
+        "stdout": run.stdout[-4000:],  # truncate to keep tool result small
+        "stderr": run.stderr[-2000:],
+        "summary": summary,
+    }
 
 
 @contextmanager
