@@ -1,6 +1,6 @@
 # code-fix-agent
 
-> Autonomous Python bug-fix agent on the Anthropic API. **12/12 pass on Claude Haiku 4.5 live, 3.58 mean iterations per bug, $0.10 total cost** (May 2026 run, before the current sandbox and independent scoring; see below). Real pytest-driven fix loop, one temp workspace per attempt, test runs in a network-less container when Docker is available, and every fix scored against a clean copy of the original tests.
+> Autonomous Python bug-fix agent on the Anthropic API. **12/12 pass on Claude Haiku 4.5 live, 3.58 mean iterations per bug, $0.10 total cost** (May 2026 run, before the current sandbox and independent scoring; see below). Real pytest-driven fix loop, one temp workspace per attempt, a network-less Docker runner for the tests (not yet run; see [Isolation and scoring](#isolation-and-scoring)), and every fix scored against a clean copy of the original tests.
 
 [![ci](https://github.com/Tajaddin/code-fix-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/code-fix-agent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -156,6 +156,8 @@ The prompt names neither the bug nor its kind. The agent reads `buggy.py` and `t
 | `auto` (default) | `docker` when `docker image inspect` finds the image. Otherwise `local` for mock runs, and an error for live runs (`code-fix-agent run`, `--mode live`): pass `--sandbox local` to run those without the image. |
 
 Build the image once with `docker build -t code-fix-agent:latest .`. Every result records the runner used.
+
+**The Docker runner is untested so far:** it has not run on any machine yet. The CI `docker` job builds the image, runs the container test (`TestDockerSandbox`) and the mock benchmark with `--sandbox docker`, and runs the benchmark inside the image as its non-root user; until that job passes, treat the `docker` row above as a design, not a result.
 
 **Scoring.** The agent's own `run_tests` result is not the verdict: it chooses which tests to run and can edit the test file. After the loop, the harness rebuilds the bug in a fresh directory from the files present at setup (tests from the setup snapshot, other files from the workspace, nothing the run created) and runs the whole suite with the same runner. That is `passed`, and exit code 0 is not enough: every test collected from the bug as it was at setup must be reported `PASSED` and the counts must hold nothing else, so a `pytest.skip()`, a `pytest.xfail()` or an early `os._exit(0)` in the source fails. The verdict is read from pytest's output, and under either runner the code under test runs inside that pytest process: code written to forge the output (fake result lines, patched reporting) is not caught. `self_reported_pass` keeps the agent's claim, and `tests_modified` flags test files that no longer match their SHA-256 from setup. Benchmark records also keep every tool input and the final diff.
 
