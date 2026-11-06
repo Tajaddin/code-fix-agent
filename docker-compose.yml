@@ -4,7 +4,7 @@ services:
     image: code-fix-agent:latest
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-    command: ["run", "bugs/01_off_by_one"]
+    command: ["run", "--sandbox", "local", "bugs/01_off_by_one"]
 
   bench:
     build: .

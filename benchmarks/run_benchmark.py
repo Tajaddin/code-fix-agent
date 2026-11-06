@@ -158,7 +158,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     bugs = _load_manifest()
-    sandbox = resolve_sandbox(args.sandbox)
+    # Live runs execute model-written code, so they only use the local runner
+    # when asked to; mock runs replay known fixes.
+    sandbox = resolve_sandbox(args.sandbox, allow_local_fallback=args.mode == "mock")
     records: list[dict] = []
     for bug in bugs:
         if args.mode == "live":

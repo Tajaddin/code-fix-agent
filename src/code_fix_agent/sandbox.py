@@ -6,12 +6,18 @@ Two runners:
 - docker: a throwaway container with no network, a read-only file system and
   workspace mount, no capabilities, and memory/CPU/process limits. Nothing
   from the caller's environment is passed in.
-- local: a subprocess with a minimal environment (no API keys), in its own
-  process group so a timeout kills every process the tests started. It still
-  runs with the caller's file-system rights, so it is the fallback for when
-  Docker or the sandbox image is not available.
+- local: a subprocess with a minimal environment, in its own session
+  (POSIX) or process group (Windows); a timeout kills that group or tree,
+  which misses a process that left the group (setsid) or, on Windows, one
+  whose parent already exited. The clean environment only stops accidental
+  inheritance of secrets: the tests run as the caller's user, next to the
+  agent process that holds ANTHROPIC_API_KEY, and can read it from there
+  (on Linux, from /proc/<parent pid>/environ). They also have the caller's
+  file-system and network access. It is a fallback, not a sandbox.
 
-"auto" picks docker when the `docker` CLI can see the sandbox image.
+"auto" picks docker when the `docker` CLI can see the sandbox image. Live
+runs, where the model writes the code, turn off auto's local fallback, so
+running them without the image takes an explicit "local".
 """
 from __future__ import annotations
 
@@ -55,8 +61,14 @@ def docker_available(image: str = SANDBOX_IMAGE) -> bool:
     return probe.returncode == 0
 
 
-def resolve_sandbox(mode: str, image: str = SANDBOX_IMAGE) -> str:
-    """Map a requested mode to the runner that will be used: "docker" or "local"."""
+def resolve_sandbox(
+    mode: str, image: str = SANDBOX_IMAGE, *, allow_local_fallback: bool = True
+) -> str:
+    """Map a requested mode to the runner that will be used: "docker" or "local".
+
+    With allow_local_fallback=False, "auto" fails instead of falling back to
+    the local runner when the image is missing.
+    """
     if mode not in SANDBOX_MODES:
         raise ValueError(f"sandbox must be one of {SANDBOX_MODES}, got {mode!r}")
     if mode == "local":
@@ -67,6 +79,13 @@ def resolve_sandbox(mode: str, image: str = SANDBOX_IMAGE) -> str:
         raise RuntimeError(
             f"docker sandbox requested but image {image!r} is not available "
             f"(build it with `docker build -t {image} .`)"
+        )
+    if not allow_local_fallback:
+        raise RuntimeError(
+            f"sandbox image {image!r} is not available. Under the local runner, "
+            "model-written code runs as your user and can read ANTHROPIC_API_KEY "
+            f"from the agent process. Build the image with `docker build -t {image} .`, "
+            "or pass --sandbox local to run without it."
         )
     return "local"
 

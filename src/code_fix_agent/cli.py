@@ -13,14 +13,15 @@ from pathlib import Path
 
 from code_fix_agent.agent import Agent
 from code_fix_agent.llm import AnthropicLLM
-from code_fix_agent.sandbox import SANDBOX_MODES
+from code_fix_agent.sandbox import SANDBOX_MODES, resolve_sandbox
 from code_fix_agent.workspace import Workspace
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
+    sandbox = resolve_sandbox(args.sandbox, allow_local_fallback=False)
     llm = AnthropicLLM(model=args.model)
     agent = Agent(llm=llm, max_iterations=args.max_iterations)
-    with Workspace.from_bug_dir(Path(args.bug_dir), sandbox=args.sandbox) as ws:
+    with Workspace.from_bug_dir(Path(args.bug_dir), sandbox=sandbox) as ws:
         result = agent.fix(ws)
     payload = {
         "bug_id": result.bug_id,
@@ -53,7 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         "--sandbox",
         choices=SANDBOX_MODES,
         default="auto",
-        help="where tests run: docker (no network, read-only), local, or auto (docker if the image exists)",
+        help=(
+            "where tests run: docker (no network, read-only), local (no isolation; the "
+            "tests can reach the API key), or auto (docker, or an error if the image is missing)"
+        ),
     )
     p_run.set_defaults(func=_cmd_run)
 

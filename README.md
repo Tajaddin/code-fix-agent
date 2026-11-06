@@ -27,8 +27,11 @@ Live mode hands the same 12 bugs to Claude Haiku 4.5 via the Anthropic API, with
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
+docker build -t code-fix-agent:latest .   # the test sandbox; see below
 python -m benchmarks.run_benchmark --mode live --max-iterations 8
 ```
+
+Live runs refuse to start without the sandbox image unless you pass `--sandbox local`, because the local runner cannot keep the API key from model-written code (see [Isolation and scoring](#isolation-and-scoring)).
 
 ## The dataset
 
@@ -78,7 +81,7 @@ This is the small-bench cousin of SWE-bench-Lite. It runs in seconds on a laptop
 pip install -e ".[dev]"
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Fix one bug, print JSON result
+# Fix one bug, print JSON result (needs the sandbox image, or --sandbox local)
 code-fix-agent run bugs/01_off_by_one
 
 # Or run the full 12-bug benchmark
@@ -149,8 +152,8 @@ The prompt names neither the bug nor its kind. The agent reads `buggy.py` and `t
 | `--sandbox` | Runner |
 |---|---|
 | `docker` | Throwaway container from `code-fix-agent:latest` (override with `CFA_SANDBOX_IMAGE`): `--network none`, read-only root and workspace mount, all capabilities dropped, `no-new-privileges`, 512 MB / 1 CPU / 128 processes, non-root, no host environment. Fails if the image is missing. |
-| `local` | Subprocess with only `PATH`, `SYSTEMROOT` and the temp-dir variables (no API key), in its own process group so the 30-second timeout kills everything the tests started. It still has the user's file-system and network access: a fallback, not a sandbox. |
-| `auto` (default) | `docker` when `docker image inspect` finds the image, otherwise `local`. |
+| `local` | Subprocess with only `PATH`, `SYSTEMROOT` and the temp-dir variables in its environment, in its own session (POSIX) or process group (Windows). The clean environment stops the API key from being inherited, not from being read: the tests run as your user, next to the agent process that holds the key, and can read it from there (on Linux, `/proc/<parent pid>/environ`). They also have your file-system and network access. The 30-second timeout kills the test process's group or tree; a process that calls `setsid()`, or on Windows one whose parent already exited, survives it. A fallback, not a sandbox. |
+| `auto` (default) | `docker` when `docker image inspect` finds the image. Otherwise `local` for mock runs, and an error for live runs (`code-fix-agent run`, `--mode live`): pass `--sandbox local` to run those without the image. |
 
 Build the image once with `docker build -t code-fix-agent:latest .`. Every result records the runner used.
 
@@ -162,8 +165,8 @@ Build the image once with `docker build -t code-fix-agent:latest .`. Every resul
 pytest --cov=code_fix_agent
 ```
 
-61 tests (the Docker one is skipped when the image is not built, the symlink one where creating symlinks needs admin rights):
-- `test_workspace.py` — copy, list, read, edit (success + missing-substring error), run_tests (fails on unfixed, passes on canonical fix), no inherited secrets, timeout kills child processes, sandbox selection and the Docker command line.
+64 tests (the Docker one is skipped when the image is not built, the symlink one where creating symlinks needs admin rights):
+- `test_workspace.py` — copy, list, read, edit (success + missing-substring error), run_tests (fails on unfixed, passes on canonical fix), no inherited secrets, timeout kills child processes, sandbox selection (live runs do not fall back to the local runner) and the Docker command line.
 - `test_tools.py` — schema completeness, dispatch, error surfacing, tracebacks in failing output, path confinement for every tool (`..`, absolute paths, symlinks).
 - `test_agent.py` — full read-edit-test loop with `MockLLM` on bugs 1 and 2, max-iteration safety, LLM exception handling, token accounting, scoring against subset runs, edited tests, a planted `conftest.py` and source that skips, xfails or exits early; no bug id in the prompt, tool inputs and diff in the result, API timeout.
 - `test_bench_smoke.py` — runs the full mock benchmark (12 bugs) and asserts 12/12 pass; the mock run exits non-zero on any failure.
@@ -173,11 +176,11 @@ The bench smoke test is the canary: if it ever drops below 12/12 in CI, either t
 ## Docker
 
 ```bash
-docker compose run --rm bench               # full mock benchmark
-docker compose run --rm fix run bugs/01_off_by_one  # one bug with live API
+docker compose run --rm bench                                # full mock benchmark
+docker compose run --rm fix run --sandbox local bugs/01_off_by_one  # one bug with live API
 ```
 
-The image runs as a non-root user. It is also the test sandbox image (`code-fix-agent:latest`); inside a compose container there is no Docker CLI, so tests there use the local runner within that container.
+The image runs as a non-root user. It is also the test sandbox image (`code-fix-agent:latest`). Inside a compose container there is no Docker CLI, so tests there use the local runner within that container, which holds the API key: the `fix` service passes `--sandbox local` to accept that.
 
 ## Project layout
 

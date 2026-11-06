@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from code_fix_agent import sandbox
+from benchmarks import run_benchmark
+from code_fix_agent import cli, sandbox
 from code_fix_agent.workspace import Workspace
 
 
@@ -107,6 +108,10 @@ class TestTestRunIsolation:
         assert not late.exists(), "a process started by the tests outlived the timeout"
 
 
+def _no_model(*args, **kwargs):
+    raise AssertionError("the run reached the model before checking the sandbox")
+
+
 class TestSandboxSelection:
     def test_auto_falls_back_to_local_without_the_image(self, monkeypatch):
         monkeypatch.setattr(sandbox, "docker_available", lambda image=sandbox.SANDBOX_IMAGE: False)
@@ -126,6 +131,25 @@ class TestSandboxSelection:
     def test_unknown_mode_is_rejected(self):
         with pytest.raises(ValueError):
             sandbox.resolve_sandbox("chroot")
+
+    def test_auto_without_the_image_refuses_when_local_fallback_is_off(self, monkeypatch):
+        monkeypatch.setattr(sandbox, "docker_available", lambda image=sandbox.SANDBOX_IMAGE: False)
+        with pytest.raises(RuntimeError, match="--sandbox local"):
+            sandbox.resolve_sandbox("auto", allow_local_fallback=False)
+        assert sandbox.resolve_sandbox("local", allow_local_fallback=False) == "local"
+
+    def test_live_cli_run_does_not_fall_back_to_local(self, monkeypatch):
+        monkeypatch.setattr(sandbox, "docker_available", lambda image=sandbox.SANDBOX_IMAGE: False)
+        monkeypatch.setattr(cli, "AnthropicLLM", _no_model)
+        with pytest.raises(RuntimeError, match="--sandbox local"):
+            cli.main(["run", str(_bug_dir("01_off_by_one"))])
+
+    def test_live_benchmark_does_not_fall_back_to_local(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sandbox, "docker_available", lambda image=sandbox.SANDBOX_IMAGE: False)
+        monkeypatch.setattr(run_benchmark, "AnthropicLLM", _no_model)
+        with pytest.raises(RuntimeError, match="--sandbox local"):
+            run_benchmark.main(["--mode", "live", "--out", str(tmp_path / "b.json")])
+        assert not (tmp_path / "b.json").exists()
 
     def test_docker_command_shuts_off_network_env_and_writes(self, tmp_path):
         cmd = sandbox.docker_command(tmp_path, ["test_buggy.py"], name="cfa-test")
