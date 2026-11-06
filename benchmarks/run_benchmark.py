@@ -153,9 +153,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=["mock", "live"], default="mock")
     parser.add_argument("--max-iterations", type=int, default=8)
     parser.add_argument("--model", default="claude-haiku-4-5-20251001")
-    parser.add_argument("--out", type=Path, default=RESULTS_DIR / "benchmark.json")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="default: results/benchmark.json for live runs, results/benchmark-mock.json for mock",
+    )
     parser.add_argument("--sandbox", choices=SANDBOX_MODES, default="auto")
     args = parser.parse_args(argv)
+    if args.out is None:
+        # benchmark.json is the committed live record; a mock run must not replace it.
+        args.out = RESULTS_DIR / ("benchmark.json" if args.mode == "live" else "benchmark-mock.json")
 
     bugs = _load_manifest()
     # Live runs execute model-written code, so they only use the local runner

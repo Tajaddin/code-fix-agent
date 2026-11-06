@@ -9,8 +9,8 @@
 ## Hero metrics
 
 Reproducible:
-- `python -m benchmarks.run_benchmark --mode mock` (no API key, pipeline smoke)
-- `python -m benchmarks.run_benchmark --mode live` (needs ANTHROPIC_API_KEY, real Haiku 4.5)
+- `python -m benchmarks.run_benchmark --mode mock` (no API key, pipeline smoke; writes `benchmarks/results/benchmark-mock.json`, not committed)
+- `python -m benchmarks.run_benchmark --mode live` (needs ANTHROPIC_API_KEY, real Haiku 4.5; writes `benchmarks/results/benchmark.json`)
 
 | Mode | Pass rate | Mean iterations / bug | Mean tool calls / bug | Total tokens | Realized cost (Haiku 4.5) |
 |---|---:|---:|---:|---:|---:|
@@ -160,11 +160,11 @@ Build the image once with `docker build -t code-fix-agent:latest .`. Every resul
 pytest --cov=code_fix_agent
 ```
 
-65 tests (the Docker one is skipped when the image is not built, the symlink one where creating symlinks needs admin rights):
+66 tests (the Docker one is skipped when the image is not built, the symlink one where creating symlinks needs admin rights):
 - `test_workspace.py` — copy, list, read, edit (success + missing-substring error), run_tests (fails on unfixed, passes on canonical fix), no inherited secrets, timeout kills child processes, sandbox selection (live runs do not fall back to the local runner) and the Docker command line.
 - `test_tools.py` — schema completeness, dispatch, error surfacing, tracebacks in failing output, path confinement for every tool (`..`, absolute paths, symlinks).
 - `test_agent.py` — full read-edit-test loop with `MockLLM` on bugs 1 and 2, max-iteration safety, LLM exception handling, token accounting, scoring against subset runs, edited tests, a planted `conftest.py` and source that skips, xfails or exits early; no bug id in the prompt, tool inputs and the diff (created and deleted files included) in the result, API timeout.
-- `test_bench_smoke.py` — runs the full mock benchmark (12 bugs) and asserts 12/12 pass; the mock run exits non-zero on any failure.
+- `test_bench_smoke.py` — runs the full mock benchmark (12 bugs) and asserts 12/12 pass; the mock run exits non-zero on any failure and does not overwrite the live record.
 
 The bench smoke test is the canary: if it ever drops below 12/12 in CI, either the dataset or the workspace layer regressed.
 
@@ -197,7 +197,7 @@ src/code_fix_agent/
 benchmarks/
   run_benchmark.py    # iterates all 12, captures stats
   results/
-    benchmark.json
+    benchmark.json      # the live run's record
 ```
 
 ## What this is NOT

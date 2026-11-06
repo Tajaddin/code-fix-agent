@@ -48,3 +48,14 @@ class TestExitCode:
     def test_mock_run_succeeds_when_every_fix_passes(self, monkeypatch, tmp_path):
         monkeypatch.setattr(run_benchmark, "_load_manifest", lambda: [{"id": "01_off_by_one"}])
         assert run_benchmark.main(["--mode", "mock", "--out", str(tmp_path / "b.json")]) == 0
+
+
+class TestOutputPath:
+    def test_mock_run_does_not_replace_the_live_record(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(run_benchmark, "RESULTS_DIR", tmp_path)
+        monkeypatch.setattr(run_benchmark, "_load_manifest", lambda: [{"id": "01_off_by_one"}])
+        live_record = tmp_path / "benchmark.json"
+        live_record.write_text('{"summary": {"mode": "live"}}', encoding="utf-8")
+        assert run_benchmark.main(["--mode", "mock"]) == 0
+        assert live_record.read_text(encoding="utf-8") == '{"summary": {"mode": "live"}}'
+        assert '"mode": "mock"' in (tmp_path / "benchmark-mock.json").read_text(encoding="utf-8")
