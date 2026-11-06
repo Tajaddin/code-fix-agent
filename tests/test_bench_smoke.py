@@ -25,6 +25,13 @@ class TestMockBenchmark:
             f"failures: {[r['id'] for r in records if not r['passed']]}"
         )
 
+    def test_records_carry_the_tool_trail_and_diff(self):
+        bug = _load_manifest()[0]
+        record = _run_one(bug, _build_mock_llm(bug["id"]), max_iterations=8)
+        old, new = _MOCK_FIXES[bug["id"]]
+        assert record["tool_trail"][1]["input"] == {"path": "buggy.py", "old": old, "new": new}
+        assert record["final_diff"].startswith("--- a/buggy.py")
+
     def test_manifest_has_a_canonical_fix_for_every_bug(self):
         bugs = _load_manifest()
         for bug in bugs:

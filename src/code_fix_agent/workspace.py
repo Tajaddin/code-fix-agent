@@ -7,6 +7,7 @@ Each Workspace owns:
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import shutil
 import tempfile
@@ -123,6 +124,24 @@ class Workspace:
             raise FileNotFoundError(f"not a file: {file_part}")
         target = path.relative_to(self.root.resolve()).as_posix() + sep + node
         return _as_result(run_pytest(self.root, [target], timeout=timeout, sandbox=self.sandbox))
+
+    def diff(self) -> str:
+        """Unified diff of every file changed since setup."""
+        chunks: list[str] = []
+        for name, data in self.originals.items():
+            current = self.root / name
+            after = current.read_bytes() if current.is_file() else b""
+            if after == data:
+                continue
+            chunks.extend(
+                difflib.unified_diff(
+                    data.decode("utf-8", errors="replace").splitlines(keepends=True),
+                    after.decode("utf-8", errors="replace").splitlines(keepends=True),
+                    fromfile=f"a/{name}",
+                    tofile=f"b/{name}",
+                )
+            )
+        return "".join(chunks)
 
     # --- scoring ----------------------------------------------------------
 

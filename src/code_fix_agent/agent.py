@@ -54,6 +54,7 @@ class AgentResult:
     error: str | None = None
     self_reported_pass: bool = False  # the model's own run_tests said PASS
     tests_modified: bool = False
+    final_diff: str = ""
 
 
 def run_agent(
@@ -108,7 +109,7 @@ def run_agent(
                     {
                         "iteration": result.iterations,
                         "tool": tool_name,
-                        "input_keys": sorted(tool_input.keys()),
+                        "input": tool_input,
                         "output_preview": output[:160],
                     }
                 )
@@ -132,6 +133,7 @@ def run_agent(
     result.passed = verdict["passed"]
     result.tests_modified = verdict["tests_modified"]
     result.final_summary = status_line(verdict)
+    result.final_diff = ws.diff()
     result.elapsed_seconds = round(time.perf_counter() - start, 3)
     return result
 

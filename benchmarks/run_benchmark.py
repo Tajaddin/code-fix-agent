@@ -138,6 +138,8 @@ def _run_one(bug: dict, llm: LLMClient, max_iterations: int, sandbox: str = "aut
         "output_tokens": result.total_output_tokens,
         "final_summary": result.final_summary,
         "error": result.error,
+        "final_diff": result.final_diff,
+        "tool_trail": result.tool_trail,
     }
 
 

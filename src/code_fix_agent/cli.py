@@ -35,6 +35,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         "total_output_tokens": result.total_output_tokens,
         "final_summary": result.final_summary,
         "error": result.error,
+        "final_diff": result.final_diff,
     }
     print(json.dumps(payload, indent=2))
     return 0 if result.passed else 1

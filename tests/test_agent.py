@@ -170,3 +170,21 @@ class TestNoBenchmarkHints:
         for hint in ("04_mutable_default", "mutable", "default"):
             assert hint not in first_prompt
             assert hint not in root_name
+
+
+class TestAuditTrail:
+    def test_result_records_tool_inputs_and_the_final_diff(self):
+        script = _build_canonical_script("01_off_by_one", "range(n)", "range(n + 1)")
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
+            result = run_agent(ws, MockLLM(script=script))
+        assert [step["tool"] for step in result.tool_trail] == ["read_file", "edit_file", "run_tests"]
+        assert result.tool_trail[1]["input"] == {"path": "buggy.py", "old": "range(n)", "new": "range(n + 1)"}
+        assert "--- a/buggy.py" in result.final_diff
+        assert "-    for i in range(n):" in result.final_diff
+        assert "+    for i in range(n + 1):" in result.final_diff
+        assert "test_buggy.py" not in result.final_diff
+
+    def test_no_edit_means_an_empty_diff(self):
+        with Workspace.from_bug_dir(_bug_dir("01_off_by_one")) as ws:
+            result = run_agent(ws, MockLLM(script=[]))
+        assert result.final_diff == ""
