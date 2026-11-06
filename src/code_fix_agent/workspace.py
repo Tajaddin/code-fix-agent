@@ -47,7 +47,8 @@ class Workspace:
     def from_bug_dir(cls, bug_dir: Path, cleanup: bool = True, sandbox: str = "auto") -> Workspace:
         bug_dir = Path(bug_dir)
         sandbox = resolve_sandbox(sandbox)  # fail before creating the temp dir
-        tmp = Path(tempfile.mkdtemp(prefix=f"cfa-{bug_dir.name}-"))
+        # The bug id stays out of the path, which shows up in tracebacks.
+        tmp = Path(tempfile.mkdtemp(prefix="cfa-"))
         for child in bug_dir.iterdir():
             if child.is_file():
                 shutil.copy2(child, tmp / child.name)

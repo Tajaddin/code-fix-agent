@@ -158,3 +158,15 @@ class TestIndependentScoring:
             verdict = ws.score()
         assert verdict["passed"] is False
         assert verdict["summary"].startswith("3 failed, 1 passed")
+
+
+class TestNoBenchmarkHints:
+    def test_prompt_and_paths_do_not_name_the_bug(self):
+        llm = MockLLM(script=[([{"type": "tool_use", "id": "tu_ls", "name": "list_dir", "input": {}}], "tool_use")])
+        with Workspace.from_bug_dir(_bug_dir("04_mutable_default")) as ws:
+            run_agent(ws, llm)
+            root_name = ws.root.name
+        first_prompt = llm.last_messages[0][0]["content"]
+        for hint in ("04_mutable_default", "mutable", "default"):
+            assert hint not in first_prompt
+            assert hint not in root_name

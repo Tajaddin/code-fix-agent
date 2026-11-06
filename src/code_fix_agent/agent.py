@@ -69,10 +69,10 @@ def run_agent(
     messages: list[dict[str, Any]] = [
         {
             "role": "user",
+            # No bug id: the ids name the bug class (e.g. 04_mutable_default).
             "content": (
-                f"Workspace contains a buggy Python file. The bug id is "
-                f"{ws.bug_id!r}. Find and fix the bug so that running pytest "
-                "on test_buggy.py passes all tests."
+                "Workspace contains a buggy Python file. Find and fix the bug so "
+                "that running pytest on test_buggy.py passes all tests."
             ),
         }
     ]
