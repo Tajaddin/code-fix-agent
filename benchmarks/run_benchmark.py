@@ -193,7 +193,9 @@ def main(argv: list[str] | None = None) -> int:
     print("\n=== code-fix-agent benchmark summary ===")
     print(json.dumps(summary, indent=2))
     print(f"\nWrote {args.out}", file=sys.stderr)
-    return 0 if summary["pass_rate_pct"] >= 75 else 0  # benchmark never fails CI; readme calls out target
+    # Mock mode replays known fixes, so anything short of 12/12 is a pipeline
+    # regression. Live results are reported, not enforced.
+    return 1 if args.mode == "mock" and passed < n else 0
 
 
 if __name__ == "__main__":

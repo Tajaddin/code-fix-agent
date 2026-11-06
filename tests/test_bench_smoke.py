@@ -6,6 +6,7 @@ workspace/tool layer regressed.
 """
 from __future__ import annotations
 
+from benchmarks import run_benchmark
 from benchmarks.run_benchmark import _MOCK_FIXES, _build_mock_llm, _load_manifest, _run_one
 
 
@@ -36,3 +37,14 @@ class TestMockBenchmark:
         bugs = _load_manifest()
         for bug in bugs:
             assert bug["id"] in _MOCK_FIXES, f"missing canonical fix for {bug['id']}"
+
+
+class TestExitCode:
+    def test_mock_run_fails_when_a_scripted_fix_stops_working(self, monkeypatch, tmp_path):
+        monkeypatch.setitem(_MOCK_FIXES, "01_off_by_one", ("range(n)", "range(n - 1)"))
+        monkeypatch.setattr(run_benchmark, "_load_manifest", lambda: [{"id": "01_off_by_one"}])
+        assert run_benchmark.main(["--mode", "mock", "--out", str(tmp_path / "b.json")]) == 1
+
+    def test_mock_run_succeeds_when_every_fix_passes(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(run_benchmark, "_load_manifest", lambda: [{"id": "01_off_by_one"}])
+        assert run_benchmark.main(["--mode", "mock", "--out", str(tmp_path / "b.json")]) == 0
