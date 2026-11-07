@@ -25,7 +25,12 @@ class LLMClient(Protocol):
 class AnthropicLLM:
     """Wraps anthropic.Anthropic. Returns (content, stop_reason, usage)."""
 
-    def __init__(self, model: str = "claude-haiku-4-5-20251001", api_key: str | None = None):
+    def __init__(
+        self,
+        model: str = "claude-haiku-4-5-20251001",
+        api_key: str | None = None,
+        timeout: float = 60.0,
+    ):
         try:
             from anthropic import Anthropic
         except ImportError as exc:
@@ -33,7 +38,9 @@ class AnthropicLLM:
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY not set; use MockLLM in tests")
-        self._client = Anthropic(api_key=key)
+        # The SDK default is 10 minutes per request; a stalled call should
+        # fail the attempt, not hang the benchmark.
+        self._client = Anthropic(api_key=key, timeout=timeout)
         self.model = model
 
     def respond(

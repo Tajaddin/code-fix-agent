@@ -92,6 +92,11 @@ def tool_schemas() -> list[dict[str, Any]]:
     ]
 
 
+def status_line(result: dict[str, Any]) -> str:
+    status = "PASS" if result["passed"] else "FAIL"
+    return f"{status} (exit {result['exit_code']}) summary={result['summary']!r}"
+
+
 def execute(ws: Workspace, tool_name: str, tool_input: dict[str, Any]) -> str:
     """Dispatch one tool call against the workspace. Returns a string result."""
     try:
@@ -117,9 +122,8 @@ def execute(ws: Workspace, tool_name: str, tool_input: dict[str, Any]) -> str:
 
         if tool_name == "run_tests":
             result = ws.run_tests(tool_input.get("test_file", "test_buggy.py"))
-            status = "PASS" if result["passed"] else "FAIL"
             body = result["stdout"] or result["stderr"]
-            return f"{status} (exit {result['exit_code']}) summary={result['summary']!r}\n{body}"
+            return f"{status_line(result)}\n{body}"
 
         return f"unknown tool: {tool_name}"
     except FileNotFoundError as exc:

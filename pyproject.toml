@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "code-fix-agent"
 version = "0.1.0"
-description = "Autonomous bug-fix agent on Claude Haiku 4.5. Curated 12-bug Python dataset. Hero: pass-rate target 9/12 (75%) at under 3 iterations per bug, under $0.05 total cost."
+description = "Autonomous bug-fix agent on Claude Haiku 4.5. Curated 12-bug Python dataset."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

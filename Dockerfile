@@ -13,7 +13,11 @@ COPY bugs ./bugs
 COPY benchmarks ./benchmarks
 COPY README.md LICENSE ./
 
-RUN pip install --no-cache-dir -e ".[dev]"
+RUN pip install --no-cache-dir -e ".[dev]" \
+    && useradd --create-home --uid 10001 app \
+    && chown -R app benchmarks/results
+
+USER app
 
 HEALTHCHECK --interval=30s --timeout=15s --start-period=5s --retries=2 \
     CMD python -c "from code_fix_agent import Agent; print('ok')" || exit 1

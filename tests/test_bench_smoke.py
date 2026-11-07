@@ -6,6 +6,7 @@ workspace/tool layer regressed.
 """
 from __future__ import annotations
 
+from benchmarks import run_benchmark
 from benchmarks.run_benchmark import _MOCK_FIXES, _build_mock_llm, _load_manifest, _run_one
 
 
@@ -25,7 +26,36 @@ class TestMockBenchmark:
             f"failures: {[r['id'] for r in records if not r['passed']]}"
         )
 
+    def test_records_carry_the_tool_trail_and_diff(self):
+        bug = _load_manifest()[0]
+        record = _run_one(bug, _build_mock_llm(bug["id"]), max_iterations=8)
+        old, new = _MOCK_FIXES[bug["id"]]
+        assert record["tool_trail"][1]["input"] == {"path": "buggy.py", "old": old, "new": new}
+        assert record["final_diff"].startswith("--- a/buggy.py")
+
     def test_manifest_has_a_canonical_fix_for_every_bug(self):
         bugs = _load_manifest()
         for bug in bugs:
             assert bug["id"] in _MOCK_FIXES, f"missing canonical fix for {bug['id']}"
+
+
+class TestExitCode:
+    def test_mock_run_fails_when_a_scripted_fix_stops_working(self, monkeypatch, tmp_path):
+        monkeypatch.setitem(_MOCK_FIXES, "01_off_by_one", ("range(n)", "range(n - 1)"))
+        monkeypatch.setattr(run_benchmark, "_load_manifest", lambda: [{"id": "01_off_by_one"}])
+        assert run_benchmark.main(["--mode", "mock", "--out", str(tmp_path / "b.json")]) == 1
+
+    def test_mock_run_succeeds_when_every_fix_passes(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(run_benchmark, "_load_manifest", lambda: [{"id": "01_off_by_one"}])
+        assert run_benchmark.main(["--mode", "mock", "--out", str(tmp_path / "b.json")]) == 0
+
+
+class TestOutputPath:
+    def test_mock_run_does_not_replace_the_live_record(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(run_benchmark, "RESULTS_DIR", tmp_path)
+        monkeypatch.setattr(run_benchmark, "_load_manifest", lambda: [{"id": "01_off_by_one"}])
+        live_record = tmp_path / "benchmark.json"
+        live_record.write_text('{"summary": {"mode": "live"}}', encoding="utf-8")
+        assert run_benchmark.main(["--mode", "mock"]) == 0
+        assert live_record.read_text(encoding="utf-8") == '{"summary": {"mode": "live"}}'
+        assert '"mode": "mock"' in (tmp_path / "benchmark-mock.json").read_text(encoding="utf-8")

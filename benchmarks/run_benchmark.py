@@ -25,6 +25,7 @@ from pathlib import Path
 
 from code_fix_agent.agent import Agent
 from code_fix_agent.llm import AnthropicLLM, LLMClient, MockLLM
+from code_fix_agent.sandbox import SANDBOX_MODES, resolve_sandbox
 from code_fix_agent.workspace import Workspace
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -118,15 +119,18 @@ def _build_mock_llm(bug_id: str) -> MockLLM:
     return MockLLM(script=script)
 
 
-def _run_one(bug: dict, llm: LLMClient, max_iterations: int) -> dict:
+def _run_one(bug: dict, llm: LLMClient, max_iterations: int, sandbox: str = "auto") -> dict:
     bug_dir = BUGS_DIR / bug["id"]
-    with Workspace.from_bug_dir(bug_dir) as ws:
+    with Workspace.from_bug_dir(bug_dir, sandbox=sandbox) as ws:
         agent = Agent(llm=llm, max_iterations=max_iterations)
         result = agent.fix(ws)
     return {
         "id": bug["id"],
         "kind": bug.get("kind", ""),
+        "sandbox": ws.sandbox,
         "passed": result.passed,
+        "self_reported_pass": result.self_reported_pass,
+        "tests_modified": result.tests_modified,
         "iterations": result.iterations,
         "tool_calls": result.tool_calls,
         "elapsed_seconds": result.elapsed_seconds,
@@ -134,6 +138,8 @@ def _run_one(bug: dict, llm: LLMClient, max_iterations: int) -> dict:
         "output_tokens": result.total_output_tokens,
         "final_summary": result.final_summary,
         "error": result.error,
+        "final_diff": result.final_diff,
+        "tool_trail": result.tool_trail,
     }
 
 
@@ -147,10 +153,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=["mock", "live"], default="mock")
     parser.add_argument("--max-iterations", type=int, default=8)
     parser.add_argument("--model", default="claude-haiku-4-5-20251001")
-    parser.add_argument("--out", type=Path, default=RESULTS_DIR / "benchmark.json")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="default: results/benchmark.json for live runs, results/benchmark-mock.json for mock",
+    )
+    parser.add_argument("--sandbox", choices=SANDBOX_MODES, default="auto")
     args = parser.parse_args(argv)
+    if args.out is None:
+        # benchmark.json is the committed live record; a mock run must not replace it.
+        args.out = RESULTS_DIR / ("benchmark.json" if args.mode == "live" else "benchmark-mock.json")
 
     bugs = _load_manifest()
+    # Live runs execute model-written code, so they only use the local runner
+    # when asked to; mock runs replay known fixes.
+    sandbox = resolve_sandbox(args.sandbox, allow_local_fallback=args.mode == "mock")
     records: list[dict] = []
     for bug in bugs:
         if args.mode == "live":
@@ -158,12 +176,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             llm = _build_mock_llm(bug["id"])
         print(f"  [{args.mode}] {bug['id']}", file=sys.stderr)
-        records.append(_run_one(bug, llm, args.max_iterations))
+        records.append(_run_one(bug, llm, args.max_iterations, sandbox))
 
     n = len(records)
     passed = sum(1 for r in records if r["passed"])
     summary = {
         "mode": args.mode,
+        "sandbox": sandbox,
         "n_bugs": n,
         "passed": passed,
         "pass_rate_pct": round(100 * passed / n, 1) if n else 0,
@@ -184,7 +203,9 @@ def main(argv: list[str] | None = None) -> int:
     print("\n=== code-fix-agent benchmark summary ===")
     print(json.dumps(summary, indent=2))
     print(f"\nWrote {args.out}", file=sys.stderr)
-    return 0 if summary["pass_rate_pct"] >= 75 else 0  # benchmark never fails CI; readme calls out target
+    # Mock mode replays known fixes, so anything short of 12/12 is a pipeline
+    # regression. Live results are reported, not enforced.
+    return 1 if args.mode == "mock" and passed < n else 0
 
 
 if __name__ == "__main__":

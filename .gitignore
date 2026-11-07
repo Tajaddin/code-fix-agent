@@ -19,6 +19,7 @@ venv/
 *.swp
 
 benchmarks/results/*.tmp.json
+benchmarks/results/benchmark-mock.json
 benchmarks/workspaces/
 
 .DS_Store

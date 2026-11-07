@@ -7,13 +7,17 @@ Each Workspace owns:
 """
 from __future__ import annotations
 
+import difflib
+import hashlib
+import re
 import shutil
-import subprocess
-import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
+
+from code_fix_agent.sandbox import RunResult, resolve_sandbox, run_pytest
 
 
 @dataclass
@@ -31,17 +35,27 @@ class Workspace:
     root: Path
     bug_id: str = ""
     _cleanup: bool = field(default=False, repr=False)
+    # "auto", "docker" or "local"; resolved at construction to the runner used.
+    sandbox: str = "auto"
+    # Top-level files as they were at setup; score() rebuilds the bug from these.
+    originals: dict[str, bytes] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.sandbox = resolve_sandbox(self.sandbox)
+        self.originals = {p.name: p.read_bytes() for p in self.root.iterdir() if p.is_file()}
 
     # --- creation ---------------------------------------------------------
 
     @classmethod
-    def from_bug_dir(cls, bug_dir: Path, cleanup: bool = True) -> Workspace:
+    def from_bug_dir(cls, bug_dir: Path, cleanup: bool = True, sandbox: str = "auto") -> Workspace:
         bug_dir = Path(bug_dir)
-        tmp = Path(tempfile.mkdtemp(prefix=f"cfa-{bug_dir.name}-"))
+        sandbox = resolve_sandbox(sandbox)  # fail before creating the temp dir
+        # The bug id stays out of the path, which shows up in tracebacks.
+        tmp = Path(tempfile.mkdtemp(prefix="cfa-"))
         for child in bug_dir.iterdir():
             if child.is_file():
                 shutil.copy2(child, tmp / child.name)
-        return cls(root=tmp, bug_id=bug_dir.name, _cleanup=cleanup)
+        return cls(root=tmp, bug_id=bug_dir.name, _cleanup=cleanup, sandbox=sandbox)
 
     def __enter__(self) -> Workspace:
         return self
@@ -52,27 +66,35 @@ class Workspace:
 
     # --- tools ------------------------------------------------------------
 
+    def resolve(self, rel: str) -> Path:
+        """Resolve `rel` (symlinks included) and refuse anything outside the root.
+
+        Every tool goes through this before touching the file system, so an
+        error never reveals whether an outside path exists.
+        """
+        root = self.root.resolve()
+        path = (root / rel).resolve()
+        if not path.is_relative_to(root):
+            raise PermissionError(f"path escapes workspace: {rel}")
+        return path
+
     def list_dir(self, rel: str = ".") -> list[str]:
-        target = (self.root / rel).resolve()
+        target = self.resolve(rel)
         if not target.is_dir():
             raise FileNotFoundError(f"not a directory: {rel}")
         return sorted(p.name for p in target.iterdir())
 
     def read(self, rel: str) -> str:
-        path = (self.root / rel).resolve()
+        path = self.resolve(rel)
         if not path.is_file():
             raise FileNotFoundError(f"not a file: {rel}")
-        if self.root not in path.parents and self.root != path.parent:
-            raise PermissionError(f"path escapes workspace: {rel}")
         return path.read_text(encoding="utf-8")
 
     def edit(self, rel: str, old: str, new: str) -> str:
         """str_replace edit. Errors if `old` is not found or not unique."""
-        path = (self.root / rel).resolve()
+        path = self.resolve(rel)
         if not path.is_file():
             raise FileNotFoundError(f"not a file: {rel}")
-        if self.root not in path.parents and self.root != path.parent:
-            raise PermissionError(f"path escapes workspace: {rel}")
         text = path.read_text(encoding="utf-8")
         if old not in text:
             raise ValueError("old string not found in file")
@@ -84,51 +106,161 @@ class Workspace:
 
     def search(self, pattern: str, rel: str = ".") -> list[tuple[str, int, str]]:
         """Substring search across files in the workspace (Python files only)."""
-        target = (self.root / rel).resolve()
+        root = self.root.resolve()
+        target = self.resolve(rel)
         out: list[tuple[str, int, str]] = []
         for path in target.rglob("*.py"):
+            path = path.resolve()
+            if not path.is_relative_to(root) or not path.is_file():
+                continue
             for i, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
                 if pattern in line:
-                    out.append((path.relative_to(self.root).as_posix(), i, line.rstrip()))
+                    out.append((path.relative_to(root).as_posix(), i, line.rstrip()))
         return out
 
     def run_tests(self, test_file: str = "test_buggy.py", timeout: float = 30.0) -> dict:
         """Run pytest on test_file. Returns dict with passed/failed counts and output."""
-        cmd = [sys.executable, "-m", "pytest", "-q", "--no-header", "--no-summary", test_file]
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=self.root,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return {
-                "passed": False,
-                "exit_code": -1,
-                "stdout": "",
-                "stderr": "timeout",
-                "summary": "timeout",
-            }
-        stdout = proc.stdout
-        stderr = proc.stderr
-        passed = proc.returncode == 0
-        # Pull the last non-empty line of stdout as a summary; pytest prints
-        # "X passed in Y.YYs" or "X failed, Y passed in Z.ZZs" there.
-        summary = ""
-        for line in reversed(stdout.splitlines()):
-            if line.strip():
-                summary = line.strip()
-                break
-        return {
-            "passed": passed,
-            "exit_code": proc.returncode,
-            "stdout": stdout[-4000:],  # truncate to keep tool result small
-            "stderr": stderr[-2000:],
-            "summary": summary,
+        file_part, sep, node = test_file.partition("::")
+        path = self.resolve(file_part)
+        if not path.is_file():
+            raise FileNotFoundError(f"not a file: {file_part}")
+        target = path.relative_to(self.root.resolve()).as_posix() + sep + node
+        return _as_result(run_pytest(self.root, [target], timeout=timeout, sandbox=self.sandbox))
+
+    def diff(self) -> str:
+        """Unified diff of every file changed, created or deleted since setup.
+
+        Created files, in subdirectories too, diff from /dev/null: code the
+        tests ran can plant a conftest.py or a new module, and the record
+        should show it.
+        """
+        current = {
+            path.relative_to(self.root).as_posix(): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
         }
+        chunks: list[str] = []
+        for name in sorted(self.originals.keys() | current.keys()):
+            before, after = self.originals.get(name), current.get(name)
+            if before == after:
+                continue
+            chunks.extend(
+                difflib.unified_diff(
+                    _lines(before),
+                    _lines(after),
+                    fromfile=f"a/{name}" if before is not None else "/dev/null",
+                    tofile=f"b/{name}" if after is not None else "/dev/null",
+                )
+            )
+        return "".join(chunks)
+
+    # --- scoring ----------------------------------------------------------
+
+    def score(self, timeout: float = 30.0) -> dict:
+        """Run the original test suite against the workspace's current source.
+
+        The model can edit the test file, run a subset of it, or (through the
+        code its tests execute) drop a conftest.py into the workspace, so its
+        own run_tests result is not a score. This rebuilds the bug in a fresh
+        directory from the files present at setup, taking the tests from the
+        setup snapshot and every other file from the workspace, and runs the
+        whole suite. `tests_modified` reports whether the workspace's test
+        files still match the snapshot's SHA-256.
+
+        Exit code 0 is not enough: the code under test can skip or xfail the
+        tests, or exit early, and pytest still exits 0. A pass needs every
+        test collected from the bug as it was at setup to be reported PASSED,
+        and nothing else (failed, skipped, xfailed, errors) in the counts.
+        """
+        tests = tuple(sorted(name for name in self.originals if _is_test_file(name)))
+        expected = _original_tests(
+            tuple(sorted(self.originals.items())), tests, self.sandbox, timeout
+        )
+        with tempfile.TemporaryDirectory(prefix="cfa-score-", ignore_cleanup_errors=True) as tmp:
+            dest = Path(tmp)
+            for name, data in self.originals.items():
+                current = self.root / name
+                if name in tests:
+                    (dest / name).write_bytes(data)
+                elif current.is_file():
+                    shutil.copyfile(current, dest / name)
+            run = run_pytest(dest, ["-rfEsxXp", *tests], timeout=timeout, sandbox=self.sandbox)
+        result = _as_result(run)
+        result["passed"] = result["passed"] and _only_these_passed(run.stdout, expected)
+        result["tests_modified"] = any(
+            _sha256(self.root / name) != hashlib.sha256(self.originals[name]).hexdigest()
+            for name in tests
+        )
+        return result
+
+
+@cache
+def _original_tests(
+    files: tuple[tuple[str, bytes], ...], tests: tuple[str, ...], sandbox: str, timeout: float
+) -> tuple[str, ...]:
+    """Node ids pytest collects from `files`, the bug as it was at setup.
+
+    Cached on the file contents: every attempt at the same bug collects the
+    same tests.
+    """
+    with tempfile.TemporaryDirectory(prefix="cfa-collect-", ignore_cleanup_errors=True) as tmp:
+        for name, data in files:
+            (Path(tmp) / name).write_bytes(data)
+        run = run_pytest(Path(tmp), ["--collect-only", *tests], timeout=timeout, sandbox=sandbox)
+    ids = []
+    for line in run.stdout.splitlines():
+        file_part, sep, _ = line.strip().partition("::")
+        if sep and file_part in tests:
+            ids.append(line.strip())
+    if run.exit_code != 0 or not ids:
+        raise RuntimeError(f"could not collect the original tests: {run.stdout[-1000:]!r}")
+    return tuple(ids)
+
+
+def _only_these_passed(stdout: str, expected: tuple[str, ...]) -> bool:
+    """True if pytest's -rp lines name exactly `expected` and its counts are all passes."""
+    lines = stdout.splitlines()
+    passed = {line.removeprefix("PASSED ").strip() for line in lines if line.startswith("PASSED ")}
+    # The last line reads e.g. "4 passed, 1 warning in 0.02s".
+    summary = next((line.strip() for line in reversed(lines) if line.strip()), "")
+    counts = {kind: int(n) for n, kind in re.findall(r"(\d+) (\w+)", summary.split(" in ")[0])}
+    counts.pop("warning", None)
+    counts.pop("warnings", None)
+    return passed == set(expected) and counts == {"passed": len(expected)}
+
+
+def _is_test_file(name: str) -> bool:
+    return name == "conftest.py" or (
+        name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+    )
+
+
+def _lines(data: bytes | None) -> list[str]:
+    return (data or b"").decode("utf-8", errors="replace").splitlines(keepends=True)
+
+
+def _sha256(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def _as_result(run: RunResult) -> dict:
+    if run.exit_code is None:
+        return {
+            "passed": False,
+            "exit_code": -1,
+            "stdout": run.stdout[-4000:],
+            "stderr": "timeout",
+            "summary": "timeout",
+        }
+    # pytest prints "X passed in Y.YYs" or "X failed, Y passed in Z.ZZs" last.
+    summary = next((line.strip() for line in reversed(run.stdout.splitlines()) if line.strip()), "")
+    return {
+        "passed": run.exit_code == 0,
+        "exit_code": run.exit_code,
+        "stdout": run.stdout[-4000:],  # truncate to keep tool result small
+        "stderr": run.stderr[-2000:],
+        "summary": summary,
+    }
 
 
 @contextmanager
